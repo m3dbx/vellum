@@ -20,9 +20,10 @@ import (
 )
 
 var defaultBuilderOpts = &BuilderOpts{
-	Encoder:           1,
-	RegistryTableSize: 10000,
-	RegistryMRUSize:   2,
+	Encoder:                  1,
+	RegistryTableSize:        10000,
+	RegistryMRUSize:          2,
+	UnfinishedNodesStackSize: 64,
 	BuilderNodePoolingConfig: BuilderNodePoolingConfig{
 		MaxSize:           10000,
 		MaxTransitionSize: 100,
@@ -57,7 +58,7 @@ func newBuilder(w io.Writer, opts *BuilderOpts) (*Builder, error) {
 
 	builderNodePool := newBuilderNodePool(opts.BuilderNodePoolingConfig)
 	rv := &Builder{
-		unfinished:      newUnfinishedNodes(builderNodePool),
+		unfinished:      newUnfinishedNodes(builderNodePool, opts),
 		registry:        newRegistry(builderNodePool, opts.RegistryTableSize, opts.RegistryMRUSize),
 		builderNodePool: builderNodePool,
 		opts:            opts,
@@ -132,7 +133,7 @@ func (b *Builder) Close() error {
 	if err != nil {
 		return err
 	}
-	root := b.unfinished.popRoot()
+	root := b.unfinished.popEmpty()
 	rootAddr, err := b.compile(root)
 	if err != nil {
 		return err
@@ -219,11 +220,15 @@ func (u *unfinishedNodes) Reset() {
 	u.pushEmpty(false)
 }
 
-func newUnfinishedNodes(p *builderNodePool) *unfinishedNodes {
+func newUnfinishedNodes(builderNodePool *builderNodePool, opts *BuilderOpts) *unfinishedNodes {
+	initialSize := opts.UnfinishedNodesStackSize
+	if initialSize <= 0 {
+		initialSize = defaultBuilderOpts.UnfinishedNodesStackSize
+	}
 	rv := &unfinishedNodes{
-		stack:           make([]*builderNodeUnfinished, 0, 64),
-		cache:           make([]builderNodeUnfinished, 64),
-		builderNodePool: p,
+		stack:           make([]*builderNodeUnfinished, 0, initialSize),
+		cache:           make([]builderNodeUnfinished, initialSize),
+		builderNodePool: builderNodePool,
 	}
 	rv.pushEmpty(false)
 	return rv

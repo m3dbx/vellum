@@ -51,6 +51,8 @@ type FSTIterator struct {
 	f   *FST
 	aut Automaton
 
+	cache fstIteratorCache
+
 	startKeyInclusive []byte
 	endKeyExclusive   []byte
 
@@ -61,6 +63,11 @@ type FSTIterator struct {
 	autStatesStack []int
 
 	nextStart []byte
+}
+
+type fstIteratorCache struct {
+	fstVersion int
+	states     []fstState
 }
 
 func newIterator(f *FST, startKeyInclusive, endKeyExclusive []byte,
@@ -86,8 +93,32 @@ func (i *FSTIterator) Reset(f *FST,
 	i.startKeyInclusive = startKeyInclusive
 	i.endKeyExclusive = endKeyExclusive
 	i.aut = aut
+	i.resetCache()
 
 	return i.pointTo(startKeyInclusive)
+}
+
+func (i *FSTIterator) resetCache() {
+	newVersion := i.f.Version()
+	if newVersion != i.cache.fstVersion {
+		// Reset the cache if the version is different, states cannot
+		// be reused between different FST versions.
+		i.cache = fstIteratorCache{}
+	}
+	i.cache.fstVersion = newVersion
+}
+
+func (i *FSTIterator) stateGet(addr int) (fstState, error) {
+	if len(i.cache.states) == 0 {
+		return i.f.decoder.stateAt(addr, nil)
+	}
+	cached := i.cache.states[len(i.cache.states)-1]
+	i.cache.states = i.cache.states[:len(i.cache.states)-1]
+	return i.f.decoder.stateAt(addr, cached)
+}
+
+func (i *FSTIterator) statePut(state fstState) {
+	i.cache.states = append(i.cache.states, state)
 }
 
 // pointTo attempts to point us to the specified location
@@ -104,13 +135,16 @@ func (i *FSTIterator) pointTo(key []byte) error {
 	}
 
 	// reset any state, pointTo always starts over
+	for j := range i.statesStack {
+		i.statesStack[j] = nil
+	}
 	i.statesStack = i.statesStack[:0]
 	i.keysStack = i.keysStack[:0]
 	i.keysPosStack = i.keysPosStack[:0]
 	i.valsStack = i.valsStack[:0]
 	i.autStatesStack = i.autStatesStack[:0]
 
-	root, err := i.f.decoder.stateAt(i.f.decoder.getRoot(), nil)
+	root, err := i.stateGet(i.f.decoder.getRoot())
 	if err != nil {
 		return err
 	}
@@ -140,7 +174,7 @@ func (i *FSTIterator) pointTo(key []byte) error {
 		}
 		autNext := i.aut.Accept(autCurr, keyJ)
 
-		next, err := i.f.decoder.stateAt(nextAddr, nil)
+		next, err := i.stateGet(nextAddr)
 		if err != nil {
 			return err
 		}
@@ -215,15 +249,8 @@ OUTER:
 
 			pos, nextAddr, v := curr.TransitionFor(t)
 
-			// the next slot in the statesStack might have an
-			// fstState instance that we can reuse
-			var nextPrealloc fstState
-			if len(i.statesStack) < cap(i.statesStack) {
-				nextPrealloc = i.statesStack[0:cap(i.statesStack)][len(i.statesStack)]
-			}
-
 			// push onto stack
-			next, err := i.f.decoder.stateAt(nextAddr, nextPrealloc)
+			next, err := i.stateGet(nextAddr)
 			if err != nil {
 				return err
 			}
@@ -250,7 +277,12 @@ OUTER:
 		}
 
 		// no transitions, and still room to pop
-		i.statesStack = i.statesStack[:len(i.statesStack)-1]
+		stateLast := len(i.statesStack) - 1
+		state := i.statesStack[stateLast]
+		i.statePut(state)
+
+		i.statesStack[stateLast] = nil
+		i.statesStack = i.statesStack[:stateLast]
 		i.keysStack = i.keysStack[:len(i.keysStack)-1]
 
 		nextOffset = i.keysPosStack[len(i.keysPosStack)-1] + 1
