@@ -27,10 +27,24 @@ func init() {
 	thousandTestWords, _ = loadWords("data/words-1000.txt")
 }
 
+func TestBuilderSimple(t *testing.T) {
+	testBuilderSimple(t, nil)
+}
+
+// TestBuilderSimpleSizeZeroRegistry is a regression test against a panic
+// that would occur when the table size was 0.
+func TestBuilderSimpleSizeZeroRegistry(t *testing.T) {
+	// Creates a copy.
+	opts := *defaultBuilderOpts
+	opts.RegistryTableSize = 0
+
+	testBuilderSimple(t, &opts)
+}
+
 // this simple test case only has a shared final state
 // it also tests out of order insert
-func TestBuilderSimple(t *testing.T) {
-	b, err := New(ioutil.Discard, nil)
+func testBuilderSimple(t *testing.T, opt *BuilderOpts) {
+	b, err := New(ioutil.Discard, opt)
 	if err != nil {
 		t.Fatalf("error creating builder: %v", err)
 	}
