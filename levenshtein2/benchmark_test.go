@@ -17,7 +17,7 @@ package levenshtein2
 import (
 	"testing"
 
-	"github.com/couchbase/vellum/levenshtein"
+	"github.com/m3db/vellum/levenshtein"
 )
 
 func BenchmarkNewEvalEditDistance1(b *testing.B) {

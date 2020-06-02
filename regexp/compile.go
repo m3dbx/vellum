@@ -20,7 +20,7 @@ import (
 
 	unicode_utf8 "unicode/utf8"
 
-	"github.com/couchbase/vellum/utf8"
+	"github.com/m3db/vellum/utf8"
 )
 
 type compiler struct {
