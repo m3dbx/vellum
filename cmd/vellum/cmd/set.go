@@ -20,7 +20,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/m3db/vellum"
+	"github.com/m3dbx/vellum"
 	"github.com/spf13/cobra"
 )
 

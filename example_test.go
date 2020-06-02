@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/m3db/vellum"
+	"github.com/m3dbx/vellum"
 )
 
 func Example() {

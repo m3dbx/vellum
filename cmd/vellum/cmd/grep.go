@@ -17,8 +17,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/m3db/vellum"
-	"github.com/m3db/vellum/regexp"
+	"github.com/m3dbx/vellum"
+	"github.com/m3dbx/vellum/regexp"
 	"github.com/spf13/cobra"
 )
 
