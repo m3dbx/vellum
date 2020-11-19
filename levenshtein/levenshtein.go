@@ -18,12 +18,24 @@ import (
 	"fmt"
 )
 
-// StateLimit is the maximum number of states allowed
-const StateLimit = 10000
+// stateLimit is the maximum number of states allowed.
+var stateLimit = 10000
 
-// ErrTooManyStates is returned if you attempt to build a Levenshtein
+// StateLimit is the maximum number of states allowed.
+func StateLimit() int {
+	return stateLimit
+}
+
+// SetStateLimit sets the maximum number of states allowed.
+func SetStateLimit(v int) {
+	stateLimit = v
+}
+
+// errTooManyStates is returned if you attempt to build a Levenshtein
 // automaton which requires too many states.
-var ErrTooManyStates = fmt.Errorf("dfa contains more than %d states", StateLimit)
+func errTooManyStates() error {
+	return fmt.Errorf("dfa contains more than %d states", StateLimit())
+}
 
 // Levenshtein implements the vellum.Automaton interface for matching
 // terms within the specified Levenshtein edit-distance of the queried
