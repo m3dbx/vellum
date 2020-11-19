@@ -531,8 +531,8 @@ func TestTooManyStatesError(t *testing.T) {
 		"1234567890123456789012345678901234567890" // 40 chars (total 140)
 
 	_, err = pDfa.buildDfa(lengthQuery, 1, false)
-	if err != ErrTooManyStates {
+	if err == nil || err.Error() != errTooManyStates().Error() {
 		t.Errorf("buildDfa(%s, 1, false) expected to fail with err: %v",
-			lengthQuery, ErrTooManyStates)
+			lengthQuery, errTooManyStates())
 	}
 }

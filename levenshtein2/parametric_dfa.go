@@ -200,7 +200,7 @@ func (pdfa *ParametricDFA) buildDfa(query string, distance uint8,
 	mask := uint32((1 << pdfa.diameter) - 1)
 
 	var stateID int
-	for stateID = 0; stateID < StateLimit; stateID++ {
+	for stateID = 0; stateID < stateLimit; stateID++ {
 		if stateID == psi.numStates() {
 			break
 		}
@@ -237,8 +237,8 @@ func (pdfa *ParametricDFA) buildDfa(query string, distance uint8,
 		}
 	}
 
-	if stateID == StateLimit {
-		return nil, ErrTooManyStates
+	if stateID == stateLimit {
+		return nil, errTooManyStates()
 	}
 
 	dfaBuilder.setInitialState(initialStateID)
@@ -262,7 +262,7 @@ func fromNfa(nfa *LevenshteinNFA) (*ParametricDFA, error) {
 
 	transitions := make([]Transition, 0, numChi*int(msDiameter))
 	var stateID int
-	for stateID = 0; stateID < StateLimit; stateID++ {
+	for stateID = 0; stateID < stateLimit; stateID++ {
 		if stateID == len(lookUp.items) {
 			break
 		}
@@ -285,8 +285,8 @@ func fromNfa(nfa *LevenshteinNFA) (*ParametricDFA, error) {
 		}
 	}
 
-	if stateID == StateLimit {
-		return nil, ErrTooManyStates
+	if stateID == stateLimit {
+		return nil, errTooManyStates()
 	}
 
 	ns := len(lookUp.items)

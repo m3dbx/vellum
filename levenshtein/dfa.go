@@ -129,8 +129,8 @@ func (b *dfaBuilder) build() (*dfa, error) {
 			i++
 		}
 
-		if len(b.dfa.states) > StateLimit {
-			return nil, ErrTooManyStates
+		if len(b.dfa.states) > stateLimit {
+			return nil, errTooManyStates()
 		}
 
 		stack, levState = stack.Pop()
