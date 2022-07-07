@@ -31,6 +31,7 @@ type registry struct {
 	table           []registryCell
 	tableSize       uint
 	mruSize         uint
+	dirtyBuckets    []uint16
 }
 
 func newRegistry(p *builderNodePool, tableSize, mruSize int) *registry {
@@ -41,15 +42,30 @@ func newRegistry(p *builderNodePool, tableSize, mruSize int) *registry {
 		tableSize:       uint(tableSize),
 		mruSize:         uint(mruSize),
 	}
+	if tableSize < (2 << (16 - 1)) {
+		// Can represent this in the dirty struct of uin16 start offset.
+		rv.dirtyBuckets = make([]uint16, 0, tableSize)
+	}
 	return rv
 }
 
 func (r *registry) Reset() {
+	// Return any dirty buckets to the pool.
+	for i := range r.dirtyBuckets {
+		start := r.mruSize * uint(r.dirtyBuckets[i])
+		end := start + r.mruSize
+		for j := start; j < end; j++ {
+			if r.table[j].node != nil {
+				r.builderNodePool.Put(r.table[j].node)
+			}
+		}
+	}
+	// Reset the dirty buckets slice.
+	r.dirtyBuckets = r.dirtyBuckets[:0]
+
+	// Use the memclear for loop optimization to clear the registry.
 	var empty registryCell
 	for i := range r.table {
-		if r.table[i].node != nil {
-			r.builderNodePool.Put(r.table[i].node)
-		}
 		r.table[i] = empty
 	}
 }
@@ -61,6 +77,11 @@ func (r *registry) entry(node *builderNode) (bool, int, *registryCell) {
 	bucket := r.hash(node)
 	start := r.mruSize * uint(bucket)
 	end := start + r.mruSize
+	if r.dirtyBuckets != nil && r.table[start].node == nil {
+		// This bucket hasn't been used yet so we should mark it as dirty now
+		// and just the first time.
+		r.dirtyBuckets = append(r.dirtyBuckets, uint16(bucket))
+	}
 	rc := registryCache(r.table[start:end])
 	return rc.entry(node, r.builderNodePool)
 }
@@ -113,7 +134,6 @@ func (r registryCache) entry(node *builderNode, pool *builderNodePool) (bool, in
 	r[last].node = node // discard LRU
 	r.promote(last)
 	return false, 0, &r[0]
-
 }
 
 func (r registryCache) promote(i int) {
