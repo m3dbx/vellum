@@ -181,14 +181,23 @@ func (f *FST) AcceptWithVal(addr int, b byte) (int, uint64) {
 // Iterator returns a new Iterator capable of enumerating the key/value pairs
 // between the provided startKeyInclusive and endKeyExclusive.
 func (f *FST) Iterator(startKeyInclusive, endKeyExclusive []byte) (*FSTIterator, error) {
-	return newIterator(f, startKeyInclusive, endKeyExclusive, nil)
+	return newIterator(f, startKeyInclusive, endKeyExclusive, nil, false)
 }
 
 // Search returns a new Iterator capable of enumerating the key/value pairs
 // between the provided startKeyInclusive and endKeyExclusive that also
 // satisfy the provided automaton.
 func (f *FST) Search(aut Automaton, startKeyInclusive, endKeyExclusive []byte) (*FSTIterator, error) {
-	return newIterator(f, startKeyInclusive, endKeyExclusive, aut)
+	return newIterator(f, startKeyInclusive, endKeyExclusive, aut, false)
+}
+
+// LazySearch returns a new Iterator capable of enumerating the key/value pairs
+// between the provided startKeyInclusive and endKeyExclusive that also
+// satisfy the provided automaton. This iterator is lazily initialized so it
+// does not advance the cursor to the start key until the first `Next()` or `Step()`
+// call on the iterator.
+func (f *FST) LazySearch(aut Automaton, startKeyInclusive, endKeyExclusive []byte) (*FSTIterator, error) {
+	return newIterator(f, startKeyInclusive, endKeyExclusive, aut, true)
 }
 
 // Debug is only intended for debug purposes, it simply asks the underlying
@@ -275,12 +284,11 @@ func (f *FST) getMinMaxKey(comparator func(byte, byte) bool) ([]byte, error) {
 }
 
 func (f *FST) GetMinKey() ([]byte, error) {
-	return f.getMinMaxKey(func (x byte, y byte) bool {return x < y})
+	return f.getMinMaxKey(func(x byte, y byte) bool { return x < y })
 }
 
-
 func (f *FST) GetMaxKey() ([]byte, error) {
-	return f.getMinMaxKey(func (x byte, y byte) bool {return x > y})
+	return f.getMinMaxKey(func(x byte, y byte) bool { return x > y })
 }
 
 // A Reader is meant for a single threaded use
