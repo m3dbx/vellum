@@ -182,6 +182,10 @@ func (m *testIterator) Next() error {
 	return nil
 }
 
+func (m *testIterator) Step(_ int) (int, error) {
+	return 1, m.Next()
+}
+
 func (m *testIterator) Seek(key []byte) error {
 	m.curr = sort.SearchStrings(m.keys, string(key))
 	if m.curr >= len(m.keys) {
@@ -190,7 +194,7 @@ func (m *testIterator) Seek(key []byte) error {
 	return nil
 }
 
-func (m *testIterator) Reset(f *FST, startKeyInclusive, endKeyExclusive []byte, aut Automaton) error {
+func (m *testIterator) Reset(f *FST, startKeyInclusive, endKeyExclusive []byte, aut Automaton, lazy bool) error {
 	return nil
 }
 

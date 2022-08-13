@@ -31,6 +31,14 @@ type Iterator interface {
 	// If no more key/value pairs exist, ErrIteratorDone is returned.
 	Next() error
 
+	// Step() advances the iterator to the next key/value pair but only
+	// reads the max number of nodes defined. If the max number of nodes
+	// are read before a valid key/value pair is found for the search
+	// criteria, then it will yield to the caller. The caller can then call
+	// `Step()` again to move the iterator forward. Returns the number of
+	// nodes iterated over.
+	Step(maxNodes int) (int, error)
+
 	// Seek() advances the iterator the specified key, or the next key
 	// if it does not exist.
 	// If no keys exist after that point, ErrIteratorDone is returned.
@@ -38,7 +46,7 @@ type Iterator interface {
 
 	// Reset resets the Iterator' internal state to allow for iterator
 	// reuse (e.g. pooling).
-	Reset(f *FST, startKeyInclusive, endKeyExclusive []byte, aut Automaton) error
+	Reset(f *FST, startKeyInclusive, endKeyExclusive []byte, aut Automaton, lazy bool) error
 
 	// Close() frees any resources held by this iterator.
 	Close() error
@@ -48,8 +56,9 @@ type Iterator interface {
 // lexicographic order.  Iterators should be constructed with the FSTIterator
 // method on the parent FST structure.
 type FSTIterator struct {
-	f   *FST
-	aut Automaton
+	f    *FST
+	aut  Automaton
+	maxQ int
 
 	cache fstIteratorCache
 
@@ -71,10 +80,10 @@ type fstIteratorCache struct {
 }
 
 func newIterator(f *FST, startKeyInclusive, endKeyExclusive []byte,
-	aut Automaton) (*FSTIterator, error) {
+	aut Automaton, lazy bool) (*FSTIterator, error) {
 
 	rv := &FSTIterator{}
-	err := rv.Reset(f, startKeyInclusive, endKeyExclusive, aut)
+	err := rv.Reset(f, startKeyInclusive, endKeyExclusive, aut, lazy)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +93,7 @@ func newIterator(f *FST, startKeyInclusive, endKeyExclusive []byte,
 // Reset resets the Iterator' internal state to allow for iterator
 // reuse (e.g. pooling).
 func (i *FSTIterator) Reset(f *FST,
-	startKeyInclusive, endKeyExclusive []byte, aut Automaton) error {
+	startKeyInclusive, endKeyExclusive []byte, aut Automaton, lazy bool) error {
 	if aut == nil {
 		aut = alwaysMatchAutomaton
 	}
@@ -95,7 +104,11 @@ func (i *FSTIterator) Reset(f *FST,
 	i.aut = aut
 	i.resetCache()
 
-	return i.pointTo(startKeyInclusive)
+	if lazy {
+		return i.prepare(startKeyInclusive)
+	}
+
+	return i.seek(startKeyInclusive)
 }
 
 func (i *FSTIterator) resetCache() {
@@ -122,7 +135,7 @@ func (i *FSTIterator) statePut(state fstState) {
 }
 
 // pointTo attempts to point us to the specified location
-func (i *FSTIterator) pointTo(key []byte) error {
+func (i *FSTIterator) prepare(key []byte) error {
 	// tried to seek before start
 	if bytes.Compare(key, i.startKeyInclusive) < 0 {
 		key = i.startKeyInclusive
@@ -187,12 +200,7 @@ func (i *FSTIterator) pointTo(key []byte) error {
 		continue
 	}
 
-	if !i.statesStack[len(i.statesStack)-1].Final() ||
-		!i.aut.IsMatch(i.autStatesStack[len(i.autStatesStack)-1]) ||
-		bytes.Compare(i.keysStack, key) < 0 {
-		return i.next(maxQ)
-	}
-
+	i.maxQ = maxQ
 	return nil
 }
 
@@ -216,24 +224,40 @@ func (i *FSTIterator) Current() ([]byte, uint64) {
 // or the advancement goes beyond the configured endKeyExclusive, then
 // ErrIteratorDone is returned.
 func (i *FSTIterator) Next() error {
-	return i.next(-1)
+	return i.next(i.maxQ, -1)
 }
 
-func (i *FSTIterator) next(lastOffset int) error {
+func (i *FSTIterator) Step(maxNodes int) (int, error) {
+	return i.nextStep(i.maxQ, maxNodes)
+}
+
+func (i *FSTIterator) next(lastOffset int, maxNodes int) error {
+	_, err := i.nextStep(lastOffset, maxNodes)
+	return err
+}
+
+func (i *FSTIterator) nextStep(lastOffset int, maxNodes int) (int, error) {
 	// remember where we started
 	i.nextStart = append(i.nextStart[:0], i.keysStack...)
+	i.maxQ = -1
 
 	nextOffset := lastOffset + 1
+	iterations := 0
 
 OUTER:
 	for true {
+		if maxNodes > 0 && iterations == maxNodes {
+			return iterations, ErrIteratorYield
+		}
+
+		iterations++
 		curr := i.statesStack[len(i.statesStack)-1]
 		autCurr := i.autStatesStack[len(i.autStatesStack)-1]
 
 		if curr.Final() && i.aut.IsMatch(autCurr) &&
 			bytes.Compare(i.keysStack, i.nextStart) > 0 {
 			// in final state greater than start key
-			return nil
+			return iterations, nil
 		}
 
 		numTrans := curr.NumTransitions()
@@ -252,7 +276,7 @@ OUTER:
 			// push onto stack
 			next, err := i.stateGet(nextAddr)
 			if err != nil {
-				return err
+				return iterations, err
 			}
 
 			i.statesStack = append(i.statesStack, next)
@@ -264,7 +288,7 @@ OUTER:
 			// check to see if new keystack might have gone too far
 			if i.endKeyExclusive != nil &&
 				bytes.Compare(i.keysStack, i.endKeyExclusive) >= 0 {
-				return ErrIteratorDone
+				return iterations, ErrIteratorDone
 			}
 
 			nextOffset = 0
@@ -292,7 +316,7 @@ OUTER:
 		i.autStatesStack = i.autStatesStack[:len(i.autStatesStack)-1]
 	}
 
-	return ErrIteratorDone
+	return iterations, ErrIteratorDone
 }
 
 // Seek advances this iterator to the specified key/value pair.  If this key
@@ -300,7 +324,22 @@ OUTER:
 // seek operation would go past the last key, or outside the configured
 // startKeyInclusive/endKeyExclusive then ErrIteratorDone is returned.
 func (i *FSTIterator) Seek(key []byte) error {
-	return i.pointTo(key)
+	return i.seek(key)
+}
+
+func (i *FSTIterator) seek(key []byte) error {
+	err := i.prepare(key)
+	if err != nil {
+		return err
+	}
+
+	if !i.statesStack[len(i.statesStack)-1].Final() ||
+		!i.aut.IsMatch(i.autStatesStack[len(i.autStatesStack)-1]) ||
+		bytes.Compare(i.keysStack, key) < 0 {
+		return i.next(i.maxQ, -1)
+	}
+
+	return nil
 }
 
 // Close will free any resources held by this iterator.

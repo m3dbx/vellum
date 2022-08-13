@@ -115,7 +115,7 @@ func TestIteratorReset(t *testing.T) {
 	}
 
 	got := map[string]uint64{}
-	err = itr.Reset(fst, nil, nil, nil)
+	err = itr.Reset(fst, nil, nil, nil, false)
 	for err == nil {
 		key, val := itr.Current()
 		got[string(key)] = val
@@ -660,5 +660,69 @@ func TestRegexpSearch(t *testing.T) {
 	}
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("with start key t, end key u, expected %v, got: %v", want, got)
+	}
+}
+
+func TestIteratorRegexpLazySearchNext(t *testing.T) {
+	var buf bytes.Buffer
+	b, err := New(&buf, nil)
+	if err != nil {
+		t.Fatalf("error creating builder: %v", err)
+	}
+
+	err = insertStringMap(b, smallSample)
+	if err != nil {
+		t.Fatalf("error building: %v", err)
+	}
+
+	err = b.Close()
+	if err != nil {
+		t.Fatalf("error closing: %v", err)
+	}
+
+	fst, err := Load(buf.Bytes())
+	if err != nil {
+		t.Fatalf("error loading set: %v", err)
+	}
+
+	r, err := regexp.New(`.*ur.*`)
+	if err != nil {
+		t.Fatalf("error building regexp automaton: %v", err)
+	}
+
+	want := map[string]uint64{
+		"thurs": 5,
+	}
+
+	got := map[string]uint64{}
+	itr, err := fst.LazySearch(r, nil, nil)
+	if err != nil {
+		t.Fatalf("error creating fst iterator: %v", err)
+	}
+
+	key, _ := itr.Current()
+	if key != nil {
+		t.Fatalf("error expected lazily initialized search")
+	}
+
+	_, err = itr.Step(1)
+	if err != ErrIteratorYield {
+		t.Fatalf("error expected yield but received: %v", err)
+	}
+
+	_, err = itr.Step(20)
+	if err != nil {
+		t.Fatalf("iterator error: %v", err)
+	}
+
+	key, val := itr.Current()
+	got[string(key)] = val
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("expected %v, got: %v", want, got)
+	}
+
+	_, err = itr.Step(20)
+	if err != ErrIteratorDone {
+		t.Fatalf("iterator error: %v", err)
 	}
 }

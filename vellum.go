@@ -45,6 +45,14 @@ import (
 // lexicographic order.
 var ErrOutOfOrder = errors.New("values not inserted in lexicographic order")
 
+// ErrIteratorYield is returned by Step method when the the iterator has
+// iterated over the input max nodes and a matching key has not been found yet.
+// When this is returned, the iterator does not have a value yet so a call to
+// Current() will be invalid. The caller needs to call back into Step() to
+// continue the iteration until no error is returned in which case there is
+// a matching key found.
+var ErrIteratorYield = errors.New("iterator-yield")
+
 // ErrIteratorDone is returned by Iterator/Next/Seek methods when the
 // Current() value pointed to by the iterator is greater than the last
 // key in this FST, or outside the configured startKeyInclusive/endKeyExclusive
