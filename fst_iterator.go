@@ -56,9 +56,8 @@ type Iterator interface {
 // lexicographic order.  Iterators should be constructed with the FSTIterator
 // method on the parent FST structure.
 type FSTIterator struct {
-	f    *FST
-	aut  Automaton
-	maxQ int
+	f   *FST
+	aut Automaton
 
 	cache fstIteratorCache
 
@@ -71,7 +70,8 @@ type FSTIterator struct {
 	valsStack      []uint64
 	autStatesStack []int
 
-	nextStart []byte
+	nextStart  []byte
+	lastOffset int
 }
 
 type fstIteratorCache struct {
@@ -200,7 +200,9 @@ func (i *FSTIterator) prepare(key []byte) error {
 		continue
 	}
 
-	i.maxQ = maxQ
+	i.nextStart = append(i.nextStart[:0], i.keysStack...)
+	i.lastOffset = maxQ
+
 	return nil
 }
 
@@ -224,11 +226,12 @@ func (i *FSTIterator) Current() ([]byte, uint64) {
 // or the advancement goes beyond the configured endKeyExclusive, then
 // ErrIteratorDone is returned.
 func (i *FSTIterator) Next() error {
-	return i.next(i.maxQ, -1)
+	return i.next(i.lastOffset, -1)
 }
 
 func (i *FSTIterator) Step(maxNodes int) (int, error) {
-	return i.nextStep(i.maxQ, maxNodes)
+	s, err := i.nextStep(i.lastOffset, maxNodes)
+	return s, err
 }
 
 func (i *FSTIterator) next(lastOffset int, maxNodes int) error {
@@ -236,17 +239,20 @@ func (i *FSTIterator) next(lastOffset int, maxNodes int) error {
 	return err
 }
 
+func (i *FSTIterator) prepareForNext() {
+	i.nextStart = append(i.nextStart[:0], i.keysStack...)
+	i.lastOffset = -1
+}
+
 func (i *FSTIterator) nextStep(lastOffset int, maxNodes int) (int, error) {
 	// remember where we started
-	i.nextStart = append(i.nextStart[:0], i.keysStack...)
-	i.maxQ = -1
-
 	nextOffset := lastOffset + 1
 	iterations := 0
 
 OUTER:
 	for true {
 		if maxNodes > 0 && iterations == maxNodes {
+			i.lastOffset = nextOffset - 1
 			return iterations, ErrIteratorYield
 		}
 
@@ -257,6 +263,7 @@ OUTER:
 		if curr.Final() && i.aut.IsMatch(autCurr) &&
 			bytes.Compare(i.keysStack, i.nextStart) > 0 {
 			// in final state greater than start key
+			i.prepareForNext()
 			return iterations, nil
 		}
 
@@ -276,6 +283,7 @@ OUTER:
 			// push onto stack
 			next, err := i.stateGet(nextAddr)
 			if err != nil {
+				i.prepareForNext()
 				return iterations, err
 			}
 
@@ -288,6 +296,7 @@ OUTER:
 			// check to see if new keystack might have gone too far
 			if i.endKeyExclusive != nil &&
 				bytes.Compare(i.keysStack, i.endKeyExclusive) >= 0 {
+				i.prepareForNext()
 				return iterations, ErrIteratorDone
 			}
 
@@ -316,6 +325,7 @@ OUTER:
 		i.autStatesStack = i.autStatesStack[:len(i.autStatesStack)-1]
 	}
 
+	i.prepareForNext()
 	return iterations, ErrIteratorDone
 }
 
@@ -336,7 +346,7 @@ func (i *FSTIterator) seek(key []byte) error {
 	if !i.statesStack[len(i.statesStack)-1].Final() ||
 		!i.aut.IsMatch(i.autStatesStack[len(i.autStatesStack)-1]) ||
 		bytes.Compare(i.keysStack, key) < 0 {
-		return i.next(i.maxQ, -1)
+		return i.next(i.lastOffset, -1)
 	}
 
 	return nil
