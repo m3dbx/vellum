@@ -46,8 +46,10 @@ type Builder struct {
 	builderNodePool *builderNodePool
 }
 
-const noneAddr = 1
-const emptyAddr = 0
+const (
+	noneAddr  = 1
+	emptyAddr = 0
+)
 
 // NewBuilder returns a new Builder which will stream out the
 // underlying representation to the provided Writer as the set is built.
@@ -209,13 +211,22 @@ type unfinishedNodes struct {
 	// as well as calls put() and popXYZ()
 	cache []builderNodeUnfinished
 
+	dirty []uint16
+
 	builderNodePool *builderNodePool
 }
 
 func (u *unfinishedNodes) Reset() {
 	u.stack = u.stack[:0]
-	for i := 0; i < len(u.cache); i++ {
-		u.cache[i] = builderNodeUnfinished{}
+	if u.dirty == nil {
+		for i := range u.cache {
+			u.cache[i] = builderNodeUnfinished{}
+		}
+	} else {
+		for _, value := range u.dirty {
+			u.cache[value] = builderNodeUnfinished{}
+		}
+		u.dirty = u.dirty[:0]
 	}
 	u.pushEmpty(false)
 }
@@ -230,14 +241,23 @@ func newUnfinishedNodes(builderNodePool *builderNodePool, opts *BuilderOpts) *un
 		cache:           make([]builderNodeUnfinished, initialSize),
 		builderNodePool: builderNodePool,
 	}
+	if initialSize < (2 << (16 - 1)) {
+		rv.dirty = make([]uint16, 0, initialSize)
+	}
 	rv.pushEmpty(false)
 	return rv
 }
 
 // get new builderNodeUnfinished, reusing cache if possible
 func (u *unfinishedNodes) get() *builderNodeUnfinished {
-	if len(u.stack) < len(u.cache) {
-		return &u.cache[len(u.stack)]
+	stackN := len(u.stack)
+	if stackN < len(u.cache) {
+		elem := &u.cache[stackN]
+		if u.dirty != nil {
+			elem.dirtyIndex = uint16(len(u.dirty))
+			u.dirty = append(u.dirty, uint16(stackN))
+		}
+		return elem
 	}
 	// full now allocate a new one
 	return &builderNodeUnfinished{}
@@ -249,11 +269,27 @@ func (u *unfinishedNodes) put() {
 		return
 		// do nothing, not part of cache
 	}
-	u.cache[len(u.stack)] = builderNodeUnfinished{}
+
+	stackN := len(u.stack)
+	if u.dirty != nil {
+		var (
+			dirtyN         = len(u.dirty)
+			currDirtyIndex = u.cache[stackN].dirtyIndex
+		)
+		// Swap last in the dirty slice to point to where we are removing elem.
+		last := u.dirty[dirtyN-1]
+		u.cache[last].dirtyIndex = currDirtyIndex
+		u.dirty[currDirtyIndex] = last
+		// Now shrink dirty slice after moving last element to where this was.
+		u.dirty = u.dirty[:dirtyN-1]
+	}
+	u.cache[stackN] = builderNodeUnfinished{}
 }
 
-func (u *unfinishedNodes) findCommonPrefixAndSetOutput(key []byte,
-	out uint64) (int, uint64) {
+func (u *unfinishedNodes) findCommonPrefixAndSetOutput(
+	key []byte,
+	out uint64,
+) (int, uint64) {
 	var i int
 	for i < len(key) {
 		if i >= len(u.stack) {
@@ -346,10 +382,11 @@ func (u *unfinishedNodes) addSuffix(bs []byte, out uint64) {
 }
 
 type builderNodeUnfinished struct {
-	node     *builderNode
-	lastOut  uint64
-	lastIn   byte
-	hasLastT bool
+	node       *builderNode
+	lastOut    uint64
+	lastIn     byte
+	hasLastT   bool
+	dirtyIndex uint16
 }
 
 func (b *builderNodeUnfinished) lastCompiled(addr int) {

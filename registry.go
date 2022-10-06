@@ -50,24 +50,31 @@ func newRegistry(p *builderNodePool, tableSize, mruSize int) *registry {
 }
 
 func (r *registry) Reset() {
+	if r.dirtyBuckets == nil {
+		// Not using dirty buckets optimization.
+		for i := range r.table {
+			if r.table[i].node != nil {
+				r.builderNodePool.Put(r.table[i].node)
+			}
+			r.table[i] = registryCell{}
+		}
+		return
+	}
+
 	// Return any dirty buckets to the pool.
 	for i := range r.dirtyBuckets {
 		start := r.mruSize * uint(r.dirtyBuckets[i])
 		end := start + r.mruSize
 		for j := start; j < end; j++ {
-			if r.table[j].node != nil {
-				r.builderNodePool.Put(r.table[j].node)
+			if node := r.table[j].node; node != nil {
+				r.builderNodePool.Put(node)
+				r.table[j] = registryCell{}
 			}
 		}
 	}
+
 	// Reset the dirty buckets slice.
 	r.dirtyBuckets = r.dirtyBuckets[:0]
-
-	// Use the memclear for loop optimization to clear the registry.
-	var empty registryCell
-	for i := range r.table {
-		r.table[i] = empty
-	}
 }
 
 func (r *registry) entry(node *builderNode) (bool, int, *registryCell) {
